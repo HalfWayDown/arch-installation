@@ -1,0 +1,176 @@
+This is my personal step for installing archlinux..
+This guide heavily inspired from https://www.youtube.com/@stephenstechtalks5377
+
+Sekarang kita akan mencoba install arch sesuai dengan apa yang ditulis di ArchWiki.
+Kita coba di virtual machine.
+
+Sebelumnya, kita set video di booting line ke 1920x1080
+
+cek internet dengan command ping
+untuk module wifi, bisa gunakan perintah iwctl
+
+gunakan reflector untuk mencari mirrorlist paling dekat
+    reflector --country ID --latest 5 --sort rate --save /etc/pacman.d/mirrorlist
+
+edit pacman.conf, uncomment opsi color dan pararel download
+    nano /etc/pacman.conf
+
+cek timedatectl, set-timezone ke Asia/Jakarta
+    timedatectl set-timezone Asia/Jakarta
+    timedatectl status
+
+mulai partisi harddisk, disini saya akan memisahkan partisi root dan home. ini preferensi pribadi, saya terbiasa menggunakan partisi table seperti ini.
+    gdisk /dev/vda
+        create partisi pertama dengan GUID ef00, besarnya kurang lebih 512MB untuk partisi boot
+        create partisi kedua, besarnya sesuaikan saja, saya memilih 20GB untuk partisi root
+        create partisi ketiga dengan sisa space yang ada untuk partisi home
+        write change, exit gdisk
+
+format partisi harddisk yang sudah dibuat
+    mkfs.vfat -n BOOT /dev/vda1 => partisi untuk boot menggunakan fat
+    mkfs.btrfs -L ROOT /dev/vda2 => partisi untuk root
+    mkfs.btrfs -L HOME /dev/vda3 => partisi home
+
+mount partisi root untuk membuat subvolume
+    mount /dev/vda2 /mnt
+    cd /mnt
+    btrfs subvolume create @
+    btrfs subvolume create @snapshots
+    cd && umount /mnt && mount /dev/vda3 /mnt && cd /mnt
+    btrfs subvolume create @home
+    btrfs subvolume create @cache
+    btrfs subvolume create @images
+    btrfs subvolume create @log
+    cd && umount /mnt
+
+remount kembali untuk memberikan mountpoints
+    mount -o compress=zstd:1,noatime,subvol=@ /dev/vda2 /mnt
+berikan mountpoint untuk subvolume di root
+    mkdir -p /mnt/{boot/efi,home,.snapshots,var/{cache,log,libvirt/images}}
+mount semua subvolume sesuai dengan mountpoint
+    mount -o compress=zstd:1,noatime,subvol=@snapshots /dev/vda2 /mnt/.snapshots
+    mount -o compress=zstd:1,noatime,subvol=@home /dev/vda3 /mnt/home
+    mount -o compress=zstd:1,noatime,subvol=@cache /dev/vda3 /mnt/var/cache
+    mount -o compress=zstd:1,noatime,subvol=@images /dev/vda3 /mnt/var/lib/libvirt/images
+    mount -o compress=zstd:1,noatime,subvol=@log /dev/vda3 /mnt/var/log
+jangan lupa mount partisi boot
+    mount /dev/vda1 /mnt/boot/efi
+cek kembali semua mountpoint dengan lsblk
+semua mountpoint sudah sesuai, partisi boot ada di vda1, partisi untuk root dan snapshots menggunakan vda2, partisi home dan var ada di partisi vda3
+
+mulai instalasi pacstrap
+    pacstrap -K /mnt base base-devel git linux linux-firmware nano openssh reflector rsync
+
+generate file system table
+    genfstab -U /mnt >> /mnt/etc/fstab
+
+pertama masuk sebagai root ke fresh install OS
+    arch-chroot /mnt
+
+cek fstab untuk memastikan file system table
+    nano /etc/fstab
+        disini bisa dilihat kalau semua partisi digunakan sesuai dengan yang kita setting di awal.
+        partisi root ada di /dev/vda2
+        partisi home ada di /dev/vda3
+        partisi boot di /dev/vda1
+        partisi lainnya juga sudah sesuai
+
+set localtime
+    ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+set hwclock
+    hwclock --systohc --utc
+set reflector untuk OS terinstall/
+    reflector --country ID --latest 5 --sort rate --save /etc/pacman.d/mirrorlist
+sinkronisasi mirrorlist
+    pacman -Syy
+
+*** section localization ***
+
+edit locale.gen
+    nano /etc/locale.gen
+    uncomment en_US.UTF-8
+    locale-gen
+
+set bahasa
+    echo LANG=en_US.UTF-8 > /etc/locale.conf
+
+*** localization selesai ***
+
+set hostname
+    echo archbox > /etc/hostname
+edit hosts
+    nano /etc/hosts
+    127.0.0.1   localhost
+    ::1         localhost
+    127.0.1.1   archbox.localdomain archbox
+
+*** instalasi aplikasi tambahan ***
+buat direktori baru untuk menyimpan list paket
+    mkdir git-package && cd git-package
+    git clone https://github.com/halfwaydown/arch-post-install
+    cd arch-post-install
+
+didalam git ini sudah tersedia beberapa list untuk post instalasi dari archlinux
+silakan sesuaikan dengan kebutuhan masing-masing sesuai dengan namanya
+kalau mau buat paclist sendiri pun ngga masalah
+disini saya siapkan paket instalasi menggunakan DE XFCE4, kalau mau diganti pake gnome, kde ataupun pakai wm seperti i3, openbox dll, sesuaikan saja.
+
+persiapkan pacman.conf
+    nano /etc/pacman.conf
+    uncomment bagian color dan parallel download
+sinkronisasi dengan command pacman -Syy
+
+*** starting post instalation ***
+pacman -S --needed - < ArchIso
+pacman -S --needed - < drivers
+pacman -S --needed - < net-paclist
+pacman -S --needed - < fonts
+pacman -S --needed - < print
+pacman -S --needed - < multimedia
+pacman -S --needed - < xorg
+pacman -S --needed - < xfce
+    pada bagian ini, ambil semua dari grup xfce4 dan xfce-goodies
+pacman -S --needed - < apps
+    karena kita menggunakan xfce, pastikan untuk memilih xdg-desktop-portal-gtk
+    karena xfce gtk3 environment
+
+set password root
+    passwd root
+
+add user
+    useradd -mG sys,log,network,floppy,scanner,power,rfkill,users,videom,storage,optical,lp,audio,wheel,adm -s /bin/zsh naufal
+    passwd naufal
+
+export VISUAL=nano
+visudo /etc/sudoers
+    uncomment wheel, supaya semua member grup wheel bisa melakukan sudo
+cek id kita, disana tertera kalau kita member wheel, artinya kita bisa melakukan sudo
+
+*** grub instalation ***
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=ArchLinux
+grub-mkconfig -o /boot/grub/grub.cfg
+nano /etc/mkinitcpio.conf
+    add btrfs module pada BINARIES, karena saya menggunakan btrfs. Jadi kalau ada kerusakan pada sistem, saya bisa langsung eksekusi.
+
+mkinitcpio -p linux
+*** grub instalation complete ***
+
+*** enabling system services ***
+systemctl enable avahi-daemon => broadcasting id kita kedalam network
+systemctl enable bluetooth => bluetooth service daemon
+systemctl enable haveged => randomization
+systemctl enable cups => printing
+systemctl enable firewalld => firewall
+systemctl enable fstrim.timer
+systemctl enable sddm => display manager/login manager
+systemctl enable NetworkManager => network manager
+systemctl enable reflector.timer => reflector
+systemctl enable sshd => secure shell
+systemctl enable upower => power management
+*** enabling system services complete ***
+
+exit shell
+umount -a
+reboot
+done
+
