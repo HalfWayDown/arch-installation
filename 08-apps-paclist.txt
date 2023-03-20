@@ -1,0 +1,8 @@
+filezilla
+firefox
+flatpak
+mpv
+neofetch
+qbittorrent
+vlc
+yt-dlp
