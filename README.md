@@ -1,2 +1,2 @@
 * My archlinux installation process.
-** heavy inspired by stephenstechtalks on youtube
+* heavy inspired by stephenstechtalks on youtube
