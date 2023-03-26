@@ -1,0 +1,153 @@
+In this video, I'll show you how to install arch linux in wiki way.
+apakah ini cara yang direkomendasikan? ngga juga.
+apa ini gampang? tergantung seberapa mau kalian ngerti sama apa yang kalian lakuin.
+apa ini keren? ngga, ini ARCH LINUX.
+
+hallo semuanya, ini adalah journalctl indonesia.
+tujuan kita cuma satu, bikin kalian melek komputer kalian sendiri.
+kali ini kita coba nunjukin gimana cara install arch linux single boot sesuai arahan arch wiki.
+ngapain jadi video? karea kalian MALAS BACA. dah itu aja.
+
+di akhir video ada penjelasan tentang kenapa ini perlu kalian mengerti.
+langsung aja kita boot up virtual machine nya.
+
+
+abis booting, cek internet.
+pake "ip a" kalau udah dapet ip, coba ping.
+    buat kalian yang pake wifi dan perlu manual connect, pake command "iwctl station <hardware wifi kita> connect <nama wifi>"
+    kalau wifi nya pake password nanti diminta buat masukin password, kalau wifi nya hidden, ganti connect pake connect-hidden.
+
+set timezone. buat WIB pake "timedatectl set-timezone Asia/Jakarta". cek lagi pake "timedatectl status".
+reflector ke mirror terdekat,
+    reflector --country ID --latest 5 --sort rate --save /etc/pacman.d/mirrorlist"
+    nano /etc/pacman.conf => uncomment bagian color sama pararell download. ini preferensi pribadi aja.
+    pacman -Syy => sinkronisasi ke mirror
+
+*** partitioning
+siapin partisinya.
+lsblk, nama hardsiknya vda.
+gdisk /dev/vda , karena single boot, kita pake semua kapasitas hardisknya. tapi pisahin root sama home. kalau nanti mau ganti distro data home aman.
+okay, n -> +512M -> ef00 karena ini partisi boot -> create -> BOOT
+terus, n -> +20G cukup lah 20 giga buat root -> create -> 2 -> ROOT
+satu lagi, n -> enter -> enter -> semuanya aja, sisanya buat home. -> create -> 3 -> HOME
+write, yes.
+
+kalau dual-boot, jangan bikin partisi boot. pake bikinan windows kalau harddisk kalian udh GPT.
+mampus info nya di share di belakang. ini kan video buat single boot. dual boot tar dibikinin lagi. hahaha
+format partisinya
+mkfs.vfat -n BOOT /dev/vda1
+mkfs.btrfs -L ROOT /dev/vda2, kalau ada error bisa kasih -f di belakang buat forcing
+mkfs.btrfs -L HOME /dev/vda3
+*** partitioning done
+
+*** pre-installation
+sekarang bikin subvolume
+mount /dev/vda2 /mnt, sekalian bikin snapshots aja ya. penjelasannya nanti di video lain. biar ga kepanjangan.
+cd /mnt
+btrfs subvolume create @
+btrfs su cr @snapshots
+cd
+umount /mnt , partisi root kasih ini aja, yang lain ke home biar ga cepet bengkak
+
+mount /dev/vda3 /mnt
+cd /mnt , disini bikin sisa subvol yg dibutuhin.
+btrfs su cr @home
+btrfs su cr @cache
+btrfs su cr @log
+btrfs su cr @images
+cd 
+umount /mnt
+
+remount root buat assign mountpoint sesuai subvolume.
+mount -o compress=zstd:1,noatime,subvol=@ /dev/vda2 /mnt
+bikin direktori yg dibutuhin
+mkdir -p /mnt/{boot/efi,home,.snapshots,var/{cache,log,lib/libvirt/images}}
+
+assign sisa mountpoint
+mount -o compress=zstd:1,noatime,subvol=@snapshots /dev/vda2 /mnt/.snapshots , mountpoint root udah selesai, karena cuma 2 subvol
+mount -o compress=zstd:1,noatime,subbol=@home /dev/vda3 /mnt/home , sisa subvol ada di partisi home, jangan salah.
+mount -o compress=zstd:1,noatime,subvol=@cahce /dev/vda3 /mnt/var/cache
+mount -o compress=zstd:1,noatime,subvol=@log /dev/vda3 /mnt/var/log
+mount -o compress=zstd:1,noatime,subvol=images /dev/vda3 /mnt/lib/libvirt/images
+mount /dev/vda1 /mnt/boot/efi -> jangan lupa partisi boot nya
+
+lsblk , disini udh keliatan semua mountpoint sama penggunaan partisinya ya.
+*** pre-installation done
+
+*** installing system
+pacstrap -K /mnt base base-devel git linux linux-firmware openssh nano reflector rsync
+
+dah, biarin install base sistemnya selesai.
+
+
+** post install 1 <fstab>
+genfstab -U /mnt >> /mnt/etc/fstab
+
+** post install 2 <arch-chroot mode>
+masuk ke fresh sistem sebagai root
+
+arch-chroot /mnt , nah sekarang kita di dalam partisi sistem yg di install barusan, kalau sebelumnya kita tadi di live installer.
+
+    * 2.1 <localization>
+    - ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+    - hwclock --systohc --utc
+    - reflector --country ID --latest 5 --sort rate --save /etc/pacman.d/mirrorlist
+    - pacman -Syy
+    - nano /etc/locale.gen , uncomment en_US.UTF-8
+    - locale-gen
+    - echo LANG=en_US.UTF-8 > /etc/locale.conf
+    * localization complete
+
+    * 2.2 <hostname hosts etc.>
+    - echo archbox > /etc/hostname
+    - nano /etc/hosts
+        127.0.0.1   localhost
+        ::1         localhost
+        127.0.1.1   archbox.localdomain archbox
+
+    * 2.3 package list
+    - mkdir git-package
+        git clone https://github.com/halfwaydown/arch-installation && cd arch-installation 
+    - pacman -S --needed - < 00-archISO
+    - pacman -S --needed - < 01-drivers
+    - pacman -S --needed - < 02-net
+    - pacman -S --needed - < 03-fonts
+    - pacman -S --needed - < 04-print
+    - pacman -S --needed - < 05-multimedia
+    - pacman -S --needed - < 06-xorg
+    - pacman -S --needed - < 07-xfce
+    - pacman -S --needed - < 08-apps
+
+    * 2.4 username and password
+    - passwd root
+    - useradd -mG sys,log,network,floppy,scanner,power,rfkill,users,video,storage,optical,lp,audio,wheel,adm -s /bin/zsh <username>
+    - passwd <username>
+
+    * 2.5 allowing sudoers
+    - export VISUAL=nano
+    - visudo /etc/sudoers
+        uncomment wheel section
+
+** post install 3 <grub installation>
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=ArchLinux
+grub-mkconfig -o /boot/grub/grub.cfg
+nano /etc/mkinitcpio.conf , add btrfs to BINARIES
+mkinitcpio -p linux
+
+** post install 4 <enabling services>
+systemctl enable avahi-daemon
+systemctl enable bluetooth
+systemctl enable haveged
+systemctl enable cups
+systemctl enable firewalld
+systemctl enable fstrim.timer
+systemctl enable sddm
+systemctl enable NetworkManager
+systemctl enable reflector.timer
+systemctl enable sshd
+systemctl enable upower
+
+exit
+umount -a
+reboot
+done
